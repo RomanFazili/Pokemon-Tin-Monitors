@@ -1,0 +1,77 @@
+from dataclasses import dataclass
+from bs4 import BeautifulSoup as BS
+from typing import Self, Literal, Optional
+from datetime import datetime
+import pytz
+
+@dataclass
+class cardmarket_item:
+    id: str
+    title: str
+    language: Literal['English']
+
+    @classmethod
+    def from_html(cls, html: BS) -> Self:
+        title_html = html.find("div", attrs={'class': 'page-title-container'}).find("h1")
+        title_html.find('span').extract()
+
+        return cls(
+            id = html.find("input", {"type":"hidden", "name":"idProduct"})['value'],
+            title = title_html.get_text(),
+            language = 'English'
+        )
+    
+    @property
+    def image_url(self) -> str:
+        return f'https://product-images.s3.cardmarket.com/1014/{self.id}/{self.id}.jpg'
+
+@dataclass
+class cardmarket_listing:
+    # Offer-specific
+    username: str
+    products_sold: int
+    available_items: int
+    item: cardmarket_item
+    location: str
+
+    image_id: Optional[str]
+    description: Optional[str]
+    price: float
+    stock: int
+
+    @classmethod
+    def from_html(cls, html: BS, item: cardmarket_item) -> Self:
+
+
+        image_id = html.find("div", {"class":"product-attributes col"}).find('a')
+        if image_id:
+            image_id = image_id['href'].split('cardmarket.com/')[-1].split('/')[0]
+
+        description = html.find("div", {"class":"product-comments"})
+        if description:
+            description = description.find("span").get_text()
+
+        items_record = html.find('span', {'class': 'sell-count'})['title']
+
+        return cls(
+            username = html.find('span', {'class': 'seller-name'}).find('a').get_text(),
+            products_sold = int(items_record.split('Sales')[0].strip()),
+            available_items = int(items_record.split('|')[-1].replace('Available items', '').strip()),
+            item = item,
+            location = html.find('span', {'class': 'seller-name'}).find_all('span', recursive=False)[1]['title'].replace('Item location:', '').strip(),
+
+            image_id = image_id,
+            description = description,
+            price = float(html.find("div", {"class":"col-offer"}).find('span').get_text().strip().replace("€", "").replace(".", "").replace(",", ".").strip()),
+            stock = int(html.find("span", {"class":"item-count"}).get_text())
+        )
+
+    @property
+    def user_url(self) -> str:
+        return f'https://www.cardmarket.com/en/Pokemon/Users/{self.username}'
+    
+    @property
+    def image_url(self) -> Optional[str]:
+        # Required to load from the site first to load the following image url
+        if self.image_id:
+            return f'https://marketplace-article-scans.s3.cardmarket.com/{self.image_id}/{self.image_id}t.jpg?timestamp={datetime.now(tz=pytz.timezone("Europe/Amsterdam")).strftime(r"%Y-%m-%d %H:%M:%S").replace(" ", "%20")}'
