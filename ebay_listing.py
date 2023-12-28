@@ -40,26 +40,35 @@ class ebay_listing:
             is_new = 'gloednieuw' in is_new.get_text().lower()
 
         image_id_pattern = '/g/(.*?)/s-'
-        image_id = re.search(image_id_pattern, html.find('img').get('src'))
+        image_id = html.find('img')
+        if image_id.get('data-src'):
+            image_id = re.search(image_id_pattern, html.find('img').get('data-src'))
+        elif image_id.get('src'):
+            image_id = re.search(image_id_pattern, html.find('img').get('src'))
         if image_id is None:
             raise ValueError('Could not find a valid image ID.')
             
         date_time_format = r'%b-%d %H:%M'
         date = html.find(name='span', attrs={'class': 's-item__listingDate'})
         if date is not None:
-            date = datetime.strptime(date.get_text(), date_time_format)
+            date = datetime.strptime(date.get_text().replace('mei', 'may').replace('okt', 'oct'), date_time_format)
             date = date.replace(year=datetime.utcnow().year)
 
         prices = html.find_all(name='span', attrs={'class': 's-item__price'})
-        current_price = clean_price(prices[0].get_text())
-        buy_now_price = clean_price(prices[-1].get_text())
+        current_price = clean_price(prices[0].get_text().split('tot')[-1].strip())
+        buy_now_price = clean_price(prices[-1].get_text().split('tot')[-1].strip())
         if buy_now_price == current_price:
             buy_now_price = None
 
         taxes = html.find(name='span', attrs={'class': 's-item__gstMessage'})
         if taxes is not None:
             taxes = clean_price(taxes.get_text().replace('btw van toepassing', ''))
-        delivery_cost = clean_price(html.find(name='span', attrs={'class': 's-item__logisticsCost'}).get_text().replace('geschatte', '').replace('verzendkosten', '').strip())
+        
+        delivery_cost = html.find(name='span', attrs={'class': 's-item__logisticsCost'}).get_text()
+        if delivery_cost in ['Gratis verzending', 'Gratis internationale verzending']:
+            delivery_cost = 0.0
+        elif delivery_cost != 'Verzendkosten niet opgegeven':
+            delivery_cost = clean_price(delivery_cost.replace('geschatte', '').replace('verzendkosten', '').strip())
 
         offers = html.find(name='span', attrs={'class': 's-item__bidCount'})
         if offers is not None:

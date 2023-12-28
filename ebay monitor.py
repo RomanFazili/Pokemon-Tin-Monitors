@@ -9,7 +9,7 @@ headers = {
     'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
     'accept-language': 'nl,en;q=0.9,en-GB;q=0.8,en-US;q=0.7',
     'dnt': '1',
-    'referer': 'https://www.ebay.nl/sch/i.html?_from=R40&_nkw=pokemon+tin&_sacat=0&_sop=1',
+    'referer': 'https://www.ebay.nl/',
     'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Microsoft Edge";v="120"',
     'sec-ch-ua-full-version': '"120.0.2210.91"',
     'sec-ch-ua-mobile': '?0',
