@@ -10,6 +10,7 @@ class cardmarket_item:
     
     id: str
     title: str
+    url_key: str
     language: Literal['English']
 
     @classmethod
@@ -18,15 +19,20 @@ class cardmarket_item:
         title_html.find('span').extract()
 
         return cls(
-            id = html.find("input", {"type":"hidden", "name":"idProduct"})['value'],
+            id = html.find('input', {"type":"hidden", "name":"idProduct"})['value'],
             title = title_html.get_text(),
+            url_key = html.find('link')['href'],
             language = 'English'
         )
     
     @property
+    def url(self) -> str:
+        return f'https://www.cardmarket.com{self.url_key}'
+    
+    @property
     def image_url(self) -> str:
         return f'https://product-images.s3.cardmarket.com/1014/{self.id}/{self.id}.jpg'
-
+    
 @dataclass
 class cardmarket_listing:
     """"Class that represents a cardmarket.com listing under a given item."""
@@ -78,3 +84,42 @@ class cardmarket_listing:
         # Required to load from the site first to load the following image url
         if self.image_id:
             return f'https://marketplace-article-scans.s3.cardmarket.com/{self.image_id}/{self.image_id}t.jpg?timestamp={datetime.now(tz=pytz.timezone("Europe/Amsterdam")).strftime(r"%Y-%m-%d %H:%M:%S").replace(" ", "%20")}'
+    
+    @property
+    def iso(self) -> Optional[str]:
+        if self.location == 'Sweden':
+            return 'SE'
+        elif self.location == 'Germany':
+            return 'DE'
+        elif self.location == 'Italy':
+            return 'IT'
+        elif self.location == 'Poland':
+            return 'PL'
+        elif self.location == 'Netherlands':
+            return 'NL'
+        elif self.location == 'Portugal':
+            return 'PT'
+        elif self.location == 'Czech Republic':
+            return 'CZ'
+        elif self.location == 'United Kingdom':
+            return 'UK'
+        elif self.location == 'Denmark':
+            return 'DK'
+        elif self.location == 'Greece':
+            return 'GR'
+        elif self.location == 'Spain':
+            return 'ES'
+        elif self.location == 'France':
+            return 'FR'
+        elif self.location == 'Belgium':
+            return 'BE'
+        elif self.location == 'Austria':
+            return 'AT'
+        
+        print(self.location)
+        return None
+    
+    def get_pretty_location(self) -> str:
+        if self.iso:
+            return f':flag_{self.iso.lower()}:'
+        return self.location
