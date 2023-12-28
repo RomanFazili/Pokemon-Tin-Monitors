@@ -7,6 +7,7 @@ import pytz
 @dataclass
 class cardmarket_item:
     """Class that represents an item on the cardmarket.com platform"""
+    
     id: str
     title: str
     language: Literal['English']
