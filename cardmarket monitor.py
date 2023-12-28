@@ -2,11 +2,12 @@ import requests
 from requests.utils import CaseInsensitiveDict
 from bs4 import BeautifulSoup as BS
 import json
-from discord_webhook import DiscordEmbed, DiscordWebhook
-import time
-import os
+from discord import SyncWebhook, Embed
+import discord
+from io import BytesIO
 import random
 from cardmarket_listing import cardmarket_item, cardmarket_listing
+from constants import CARDMARKET_WEBHOOK
 
 def safeFetch(url) -> requests.Response:
     session = requests.session()
@@ -69,10 +70,6 @@ for searchPage in range(1,100,1):
         break
 
     soup = BS(response_text, 'html.parser')
-    if soup.find("div", {"class":"table-body"}) is None:
-        print(response_text)
-        print("Could not find the table body!")
-        exit()
     items = soup.find("div", {"class":"table-body"}).find_all("div", recursive=False)
 
     urls: list[str] = []
@@ -81,7 +78,6 @@ for searchPage in range(1,100,1):
             continue
         localHrefs = [a.get("href") for a in item.find_all("a")]
         urls.append("https://www.cardmarket.com" + localHrefs[-1] + "?language=1")
-
 
     for url in urls:
         response_text = safeFetch(url)
@@ -93,5 +89,36 @@ for searchPage in range(1,100,1):
 
         for listing_html in listings_html:
             listing = cardmarket_listing.from_html(html=listing_html, item=item)
-            print(listing)
-        exit()
+
+            if listing.description:
+                skip = False
+                for negative_keyword in ['empty', 'opened', 'no packs', 'only the tin', 'only tin', 'no cards', 'just the tin', 'just the metal box']:
+                    if negative_keyword in listing.description:
+                        skip = True
+                        break
+
+                if skip:
+                    continue
+
+
+            webhook = SyncWebhook.from_url(CARDMARKET_WEBHOOK)
+            embed = Embed(title = listing.item.title, url = listing.item.url, description=listing.description)
+
+            # Discord doesn't display image urls from cardmarket due to CORS settings. 
+            # Hence, we download the image and upload it to discord manually.
+
+            response_image = requests.get(listing.item.image_url, headers={'referer': 'cardmarket'})
+            thumbnail = discord.File(fp=BytesIO(response_image.content), filename='thumbnail.png')
+            embed.set_thumbnail(url='attachment://thumbnail.png')
+
+            if listing.image_id:
+                response_image = requests.get(listing.image_url, headers={'referer': 'cardmarket'})
+                image = discord.File(fp=BytesIO(response_image.content), filename='image.png')
+                embed.set_image(url='attachment://image.png')
+
+            embed.add_field(name='Price', value=f'€{listing.price:.2f}', inline=True)
+            embed.add_field(name='Stock', value=listing.stock, inline=True)
+            embed.add_field(name='Seller', value=f'{listing.get_pretty_location()} [{listing.username}]({listing.user_url})\n {listing.products_sold} Sales | {listing.available_items} Available items', inline=False)
+
+            webhook.send(embed=embed, files=[thumbnail, image])
+            break
