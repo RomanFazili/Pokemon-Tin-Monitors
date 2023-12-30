@@ -11,11 +11,15 @@ class ebay_listing:
     id: str
     title: str
     image_id: str
-    date: datetime
     current_price: float
     delivery_cost: float
     origin_country: str
 
+    username: str
+    products_sold: int
+    percentage_positive: float # between 0-1
+
+    date: Optional[datetime] # Only when ebay shows it
     is_new: Optional[bool] # Only None when 'PROBSTEIN is actively accepting consignment' is in the way
     taxes: Optional[float] # Only when taxes apply
 
@@ -79,6 +83,9 @@ class ebay_listing:
             date_time_format = r'%H:%M'
             current_time_utc_minus_seven = datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(pytz.timezone('America/Denver'))
         
+            if '-' in expiry_date:
+                # TODO: Calculate the weekday from here
+                None
             weekday = int(expiry_date.get_text().replace('(', '').split(' ')[0].replace('Vandaag', str(current_time_utc_minus_seven.weekday())).replace('ma', '0').replace('di', '1').replace('wo', '2').replace('do', '3').replace('vr', '4').replace('za', '5').replace('zo', '6').replace(',', '').strip())
             expiry_time = datetime.strptime(expiry_date.get_text().replace(')', '').split(' ')[-1], date_time_format).replace(tzinfo=pytz.timezone('America/Denver'))
 
@@ -86,6 +93,11 @@ class ebay_listing:
             next_occurrence = current_time_utc_minus_seven + timedelta(days=days_until_expiry)
 
             expiry_date = datetime.combine(next_occurrence, expiry_time.time())
+
+        user_text = html.find('span', {'class': 's-item__seller-info-text'}).get_text()
+        username = user_text.split('(')[0].strip()
+        products_sold = int(user_text.split('(')[-1].split(')')[0].replace('.', '').strip())
+        percentage_positive = float(user_text.split(')')[-1].replace('%', '').replace(',', '.').strip()) / 100
 
         return cls(
             id = id.group(1),
@@ -100,11 +112,70 @@ class ebay_listing:
             origin_country = html.find(name='span', attrs={'class': 's-item__itemLocation'}).get_text().replace('van', '').strip(),
             offers = offers,
             expiry_date = expiry_date,
+            username = username,
+            products_sold = products_sold,
+            percentage_positive = percentage_positive
         )
     
     @property
     def url(self) -> str:
         return f'https://www.ebay.nl/itm/{self.id}'
+    
+    @property
+    def user_url(self) -> str:
+        return f'https://www.ebay.com/usr/{self.username}'
+    
+    @property
+    def is_auction(self) -> str:
+        return self.offers is not None
+    
+    @property
+    def iso(self) -> Optional[str]:
+        if self.origin_country == 'Verenigde Staten':
+            return 'US'
+        elif self.origin_country == 'Verenigd Koninkrijk':
+            return 'GB'
+        elif self.origin_country == 'Nieuw-Zeeland':
+            return 'NZ'
+        elif self.origin_country == 'Denemarken':
+            return 'DK'
+        elif self.origin_country == 'België':
+            return 'BE'
+        elif self.origin_country == 'Duitsland':
+            return 'DE'
+        elif self.origin_country == 'Canada':
+            return 'CA'
+        elif self.origin_country == 'Frankrijk':
+            return 'FR'
+        elif self.origin_country == 'Italië':
+            return 'IT'
+        elif self.origin_country == 'Australië':
+            return 'AU'
+        elif self.origin_country == 'Noorwegen':
+            return 'NO'
+        return None
+    
+    def get_price(self, include_extras: bool = False) -> float:
+        price = 0.0
+        if self.is_auction:
+            if self.buy_now_price:
+                price += self.buy_now_price
+            else:
+                price += self.current_price
+        else:
+            if self.current_price:
+                price += self.current_price
+
+        if include_extras:
+            price += self.delivery_cost
+            if self.taxes:
+                price += self.taxes
+        return price
+    
+    def get_extras_price(self) -> float:
+        if self.taxes:
+            return self.delivery_cost + self.taxes
+        return self.delivery_cost
 
     def get_image_url(self, resolution: int = 300) -> str:
         if resolution > 1200 or resolution < 50:
@@ -113,3 +184,8 @@ class ebay_listing:
     
     def save(self, cursor: pymysql.cursors.DictCursor) -> None:
         cursor.execute('INSERT INTO ebay_listings (id) VALUES (%s);', (self.id, ))
+
+    def get_pretty_location(self) -> str:
+        if self.iso:
+            return f':flag_{self.iso.lower()}:'
+        return self.origin_country
