@@ -102,7 +102,7 @@ class cardmarket_listing:
         elif self.location == 'Czech Republic':
             return 'CZ'
         elif self.location == 'United Kingdom':
-            return 'UK'
+            return 'GB'
         elif self.location == 'Denmark':
             return 'DK'
         elif self.location == 'Greece':
@@ -115,6 +115,14 @@ class cardmarket_listing:
             return 'BE'
         elif self.location == 'Austria':
             return 'AT'
+        elif self.location == 'Lithuania':
+            return 'LT'
+        elif self.location == 'Switzerland':
+            return 'CH'
+        elif self.location == 'Slovenia':
+            return 'SI'
+        elif self.location == 'Croatia':
+            return 'HR'
         
         print(self.location)
         return None
