@@ -26,6 +26,7 @@ def ebay_monitor() -> None:
 
         while True:
             response = requests.session().get(url='https://www.ebay.nl/sch/i.html', params=params)
+            print(response.url)
 
             soup = BS(response.content, 'html.parser')
             listings_html = soup.find(name='ul', attrs={'class':'srp-results'}).find_all(name='li', attrs={'class': 's-item'}, recursive=False)
@@ -41,9 +42,6 @@ def ebay_monitor() -> None:
                     with connection.cursor() as cursor:
                         listing.save(cursor=cursor)
 
-                print(listing)
-                print(listing.offers)
-                print(listing.is_auction)
                 skip = False
                 for negative_keyword in NEGATIVE_KEYWORDS:
                     if negative_keyword in listing.title.lower():
@@ -62,7 +60,8 @@ def ebay_monitor() -> None:
                     if listing.buy_now_price:
                         embed.add_field(name='Buy Now Price', value=f'€{listing.buy_now_price:.2f}', inline=True)
                     embed.add_field(name='Offers', value=str(listing.offers), inline=True)
-                    embed.add_field(name='Expiry date', value=f'<t:{int(listing.expiry_date.timestamp())}:f> <t:{int(listing.expiry_date.timestamp())}:R>', inline=True)
+                    if listing.expiry_date:
+                        embed.add_field(name='Expiry date', value=f'<t:{int(listing.expiry_date.timestamp())}:f> <t:{int(listing.expiry_date.timestamp())}:R>', inline=True)
                 else:
                     embed.add_field(name='Price', value=f'€{listing.get_price():.2f} | €{listing.get_price(True):.2f} shipped.', inline=True)
 
