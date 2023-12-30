@@ -3,26 +3,8 @@ import requests
 from ebay_listing import ebay_listing
 import utils
 import time
-
-headers = {
-    'authority': 'www.ebay.nl',
-    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-    'accept-language': 'nl,en;q=0.9,en-GB;q=0.8,en-US;q=0.7',
-    'dnt': '1',
-    'referer': 'https://www.ebay.nl/',
-    'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Microsoft Edge";v="120"',
-    'sec-ch-ua-full-version': '"120.0.2210.91"',
-    'sec-ch-ua-mobile': '?0',
-    'sec-ch-ua-model': '""',
-    'sec-ch-ua-platform': '"Windows"',
-    'sec-ch-ua-platform-version': '"15.0.0"',
-    'sec-fetch-dest': 'document',
-    'sec-fetch-mode': 'navigate',
-    'sec-fetch-site': 'same-origin',
-    'sec-fetch-user': '?1',
-    'upgrade-insecure-requests': '1',
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
-}
+from discord import SyncWebhook, Embed
+from constants import EBAY_WEBHOOK, NEGATIVE_KEYWORDS
 
 params = {
     '_nkw': 'pokemon tin', # Query
@@ -43,7 +25,7 @@ def ebay_monitor() -> None:
             foundIds.add(result['id'])
 
         while True:
-            response = requests.session().get(url='https://www.ebay.nl/sch/i.html', headers=headers, params=params)
+            response = requests.session().get(url='https://www.ebay.nl/sch/i.html', params=params)
 
             soup = BS(response.content, 'html.parser')
             listings_html = soup.find(name='ul', attrs={'class':'srp-results'}).find_all(name='li', attrs={'class': 's-item'}, recursive=False)
@@ -59,10 +41,40 @@ def ebay_monitor() -> None:
                     with connection.cursor() as cursor:
                         listing.save(cursor=cursor)
 
-                # Ping for new item
+                print(listing)
+                print(listing.offers)
+                print(listing.is_auction)
+                skip = False
+                for negative_keyword in NEGATIVE_KEYWORDS:
+                    if negative_keyword in listing.title.lower():
+                        skip = True
+                        break
+                if skip:
+                    continue
+
+                # Send the webhook
+                webhook = SyncWebhook.from_url(EBAY_WEBHOOK)
+                embed = Embed(title=listing.title, url=listing.url)
+                embed.set_thumbnail(url=listing.get_image_url(1000))
+
+                if listing.is_auction:
+                    embed.add_field(name='Current Price', value=f'€{listing.current_price:.2f} + €{listing.get_extras_price():.2f}', inline=True)
+                    if listing.buy_now_price:
+                        embed.add_field(name='Buy Now Price', value=f'€{listing.buy_now_price:.2f}', inline=True)
+                    embed.add_field(name='Offers', value=str(listing.offers), inline=True)
+                    embed.add_field(name='Expiry date', value=f'<t:{int(listing.expiry_date.timestamp())}:f> <t:{int(listing.expiry_date.timestamp())}:R>', inline=True)
+                else:
+                    embed.add_field(name='Price', value=f'€{listing.get_price():.2f} | €{listing.get_price(True):.2f} shipped.', inline=True)
+
+                if listing.date:
+                    embed.add_field(name='Date', value=f'<t:{int(listing.date.timestamp())}:f> <t:{int(listing.date.timestamp())}:R>', inline=True)
+                embed.add_field(name='Seller', value=f'{listing.get_pretty_location()} [{listing.username}]({listing.user_url})\n {listing.products_sold} Sales | {(100 * listing.percentage_positive):.0f}% Positive Ratings', inline=False)
+
+                webhook.send(embed=embed)
+                time.sleep(1)
 
             time.sleep(10)
     except BaseException as err:
-        print(err)
+        raise err
 
 ebay_monitor()

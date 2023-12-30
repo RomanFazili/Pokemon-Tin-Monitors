@@ -7,11 +7,13 @@ import discord
 from io import BytesIO
 import random
 from cardmarket_listing import cardmarket_item, cardmarket_listing
-from constants import CARDMARKET_WEBHOOK
+from constants import CARDMARKET_WEBHOOK, ROTATING_PROXY
+import utils
 
 def safeFetch(url) -> requests.Response:
     session = requests.session()
     headers = CaseInsensitiveDict()
+    proxies = ROTATING_PROXY
     headers["accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
     headers["accept-encoding"] = "gzip, deflate, br"
     headers["accept-language"] = "nl"
@@ -36,7 +38,7 @@ def safeFetch(url) -> requests.Response:
     safeFetchId = None
     attempts = 0
     while safeFetchId is None and attempts < 10:
-        response = session.get(url="https://docs.google.com/gview?url=" + str(url), headers=headers, proxies=None, timeout=20)
+        response = session.get(url="https://docs.google.com/gview?url=" + str(url), headers=headers, proxies=proxies, timeout=20)
         if response.status_code == 204:
             attempts = attempts + 1
             continue
@@ -50,7 +52,7 @@ def safeFetch(url) -> requests.Response:
 
     status = None
     while status in [None, 500]:
-        response = session.get(url="https://docs.google.com/viewerng/text?id=" + str(safeFetchId) + "&authuser=0&page=0", timeout=20, proxies=None, headers=headers)
+        response = session.get(url="https://docs.google.com/viewerng/text?id=" + str(safeFetchId) + "&authuser=0&page=0", timeout=20, proxies=proxies, headers=headers)
         status = response.status_code
 
     try:
@@ -62,45 +64,78 @@ def safeFetch(url) -> requests.Response:
 
 filtered = set()
 
+
 for searchPage in range(1,100,1):
 
+    # Get a list of items
     response_text = safeFetch("https://www.cardmarket.com/en/Pokemon/Products/Tins?site=" + str(searchPage))
-
-    if "Sorry, no matches for your query" in response_text:
+    if 'Sorry, no matches for your query' in response_text or 'We had to limit your search results to' in response_text:
         break
-
     soup = BS(response_text, 'html.parser')
-    items = soup.find("div", {"class":"table-body"}).find_all("div", recursive=False)
+    items_html = soup.find("div", {"class":"table-body"}).find_all("div", recursive=False)
 
-    urls: list[str] = []
-    for item in items:
-        if item.get("id").replace("productRow", "") in filtered:
+
+    for item_html in items_html:
+        # Compare initial prices
+        id = item_html['id'].replace("productRow", "")
+
+        with utils.getMySQLConnection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT price FROM cardmarket_items WHERE id=%s', (id, ))
+                result = cursor.fetchone()
+        bestPrice = None
+        if result:
+            bestPrice = float(result['price'])
+        print(id, bestPrice)
+
+        lowestItemPrice = item_html.find('div', {'class': 'col-price'}).get_text().strip()
+        if lowestItemPrice != 'N/A':
+            lowestItemPrice = float(lowestItemPrice.replace("€", "").replace(".", "").replace(",", ".").strip())
+
+        if lowestItemPrice == bestPrice:
             continue
-        localHrefs = [a.get("href") for a in item.find_all("a")]
-        urls.append("https://www.cardmarket.com" + localHrefs[-1] + "?language=1")
-
-    for url in urls:
+        if lowestItemPrice == 'N/A' and bestPrice is None:
+            continue
+        
+        # Make the request, parse listing table
+        url = f'https://www.cardmarket.com{item_html.find_all("a")[-1]["href"]}?language=1'
         response_text = safeFetch(url)
-        print(url)
         soup = BS(response_text, 'html.parser')
 
         item = cardmarket_item.from_html(html=soup)
         listings_html = soup.find("div", {"class":"table-body"}).find_all("div", recursive=False)
 
         for listing_html in listings_html:
+            # Check if there are even any listings
+            if listing_html.find('p', {'class': 'noResults'}) is not None:
+                break
+
             listing = cardmarket_listing.from_html(html=listing_html, item=item)
 
+            # Filter bad entries
             if listing.description:
                 skip = False
-                for negative_keyword in ['empty', 'opened', 'no packs', 'only the tin', 'only tin', 'no cards', 'just the tin', 'just the metal box']:
-                    if negative_keyword in listing.description:
+                for negative_keyword in ['empty', 'opened', 'no packs', 'only the tin', 'only tin', 'no cards', 'just the tin', 'just the metal box', 'vuota']:
+                    if negative_keyword in listing.description.lower():
                         skip = True
                         break
 
                 if skip:
                     continue
 
+            # Compare and update prices
+            with utils.getMySQLConnection() as connection:
+                with connection.cursor() as cursor:
+                    if bestPrice and bestPrice <= listing.price:
+                        cursor.execute('UPDATE cardmarket_items SET price=%s WHERE id=%s', (listing.price, listing.item.id))
+                        break
 
+                    if bestPrice is None:
+                        cursor.execute('INSERT INTO cardmarket_items (id,price) VALUES (%s,%s)', (listing.item.id, listing.price))
+                    else:
+                        cursor.execute('UPDATE cardmarket_items SET price=%s WHERE id=%s', (listing.price, listing.item.id))
+
+            # Send the webhook
             webhook = SyncWebhook.from_url(CARDMARKET_WEBHOOK)
             embed = Embed(title = listing.item.title, url = listing.item.url, description=listing.description)
 
@@ -111,14 +146,16 @@ for searchPage in range(1,100,1):
             thumbnail = discord.File(fp=BytesIO(response_image.content), filename='thumbnail.png')
             embed.set_thumbnail(url='attachment://thumbnail.png')
 
+            files: list[discord.File] = [thumbnail]
             if listing.image_id:
                 response_image = requests.get(listing.image_url, headers={'referer': 'cardmarket'})
                 image = discord.File(fp=BytesIO(response_image.content), filename='image.png')
                 embed.set_image(url='attachment://image.png')
+                files.append(image)
 
             embed.add_field(name='Price', value=f'€{listing.price:.2f}', inline=True)
             embed.add_field(name='Stock', value=listing.stock, inline=True)
             embed.add_field(name='Seller', value=f'{listing.get_pretty_location()} [{listing.username}]({listing.user_url})\n {listing.products_sold} Sales | {listing.available_items} Available items', inline=False)
 
-            webhook.send(embed=embed, files=[thumbnail, image])
+            webhook.send(embed=embed, files=files)
             break
