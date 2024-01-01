@@ -62,8 +62,6 @@ def safeFetch(url) -> requests.Response:
         print(response.status_code)
     return response_text
 
-filtered = set()
-
 
 for searchPage in range(1,100,1):
 
@@ -153,7 +151,10 @@ for searchPage in range(1,100,1):
                 embed.set_image(url='attachment://image.png')
                 files.append(image)
 
-            embed.add_field(name='Price', value=f'€{listing.price:.2f}', inline=True)
+            if bestPrice:
+                embed.add_field(name='Price', value=f'€{listing.price:.2f} <- €{bestPrice:.2f}', inline=True)
+            else:
+                embed.add_field(name='Price', value=f'€{listing.price:.2f}', inline=True)
             embed.add_field(name='Stock', value=listing.stock, inline=True)
             embed.add_field(name='Seller', value=f'{listing.get_pretty_location()} [{listing.username}]({listing.user_url})\n {listing.products_sold} Sales | {listing.available_items} Available items', inline=False)
 
